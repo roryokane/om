@@ -1,5 +1,5 @@
 (ns om.core
-  (:require-macros [om.core :refer [check allow-reads tag]])
+  (:require-macros [om.core :refer [check allow-reads]])
   (:require [om.dom :as dom :include-macros true])
   (:import [goog.ui IdGenerator]))
 
@@ -583,12 +583,11 @@
          (nil? m)
          (let [shared (or (:shared m) (get-shared *parent*))
                ctor   (or (:ctor m) pure)]
-           (tag
-             (ctor #js {:__om_cursor cursor
-                        :__om_shared shared
-                        :__om_instrument *instrument*
-                        :children (fn [this] (allow-reads (f cursor this)))})
-             f))
+           (ctor #js {:__om_cursor cursor
+                      :__om_shared shared
+                      :__om_instrument *instrument*
+                      :__type__ (goog/getUid f)
+                      :children (fn [this] (allow-reads (f cursor this)))}))
 
          :else
          (let [{:keys [key state init-state opts]} m
@@ -603,19 +602,18 @@
                          (get m :react-key))
                shared  (or (:shared m) (get-shared *parent*))
                ctor    (or (:ctor m) pure)]
-           (tag
-             (ctor #js {:__om_cursor cursor'
-                        :__om_index (::index m)
-                        :__om_init_state init-state
-                        :__om_state state
-                        :__om_shared shared
-                        :__om_instrument *instrument*
-                        :key rkey
-                        :children
-                        (if (nil? opts)
-                          (fn [this] (allow-reads (f cursor' this)))
-                          (fn [this] (allow-reads (f cursor' this opts))))})
-             f))))))
+           (ctor #js {:__om_cursor cursor'
+                      :__om_index (::index m)
+                      :__om_init_state init-state
+                      :__om_state state
+                      :__om_shared shared
+                      :__om_instrument *instrument*
+                      :__type__ (goog/getUid f)
+                      :key rkey
+                      :children
+                      (if (nil? opts)
+                        (fn [this] (allow-reads (f cursor' this)))
+                        (fn [this] (allow-reads (f cursor' this opts))))}))))))
 
 (defn build
   "Builds an Om component. Takes an IRender/IRenderState instance

@@ -8,6 +8,9 @@
 (def ^{:dynamic true} *cursor* nil)
 (def ^{:dynamic true} *instrument* nil)
 
+(defn id [owner]
+  (aget (.-state owner) "__om_id"))
+
 ;; =============================================================================
 ;; React Life Cycle Protocols
 ;;
@@ -99,10 +102,23 @@
 (defprotocol ITransact
   (-transact! [cursor korks f tag]))
 
+;; -----------------------------------------------------------------------------
+;; Private Protocols
+
 (defprotocol INotify
   (-listen! [x key tx-listen])
   (-unlisten! [x key])
   (-notify! [x tx-data root-cursor]))
+
+(defprotocol ISubRoot
+  (-parent-path [cursor]))
+
+(defprotocol IDeps
+  (-add-dep! [state parent-path subroot-id])
+  (-remove-dep! [state subroot-id])
+  (-dirty? [state path]))
+
+;; -----------------------------------------------------------------------------
 
 (declare notify* path)
 
@@ -163,6 +179,25 @@
      (let [ks (if (sequential? korks) korks [korks])] 
        (-get-state owner ks))))
 
+(declare refresh!)
+
+(defn ^:private link* [cursor parent]
+  (specify cursor
+    ICursorDerive
+    (-derive [this derived state path]
+      (link* (to-cursor derived state path) parent))
+    ITransact
+    (-transact! [this korks f tag]
+      (refresh! parent)
+      (transact* state this korks f tag))))
+
+(defn ^:private link [cursor]
+  (println "linking!")
+  (let [parent *parent*]
+    (specify (link* cursor parent)
+      ISubRoot
+      (-parent-path [_] (path (get-props parent))))))
+
 (defn get-shared
   "Takes an owner and returns a map of global shared values for a
    render loop. An optional key or sequence of keys may be given to
@@ -171,15 +206,30 @@
     (when-not (nil? owner)
       (aget (.-props owner) "__om_shared")))
   ([owner korks]
-    (cond
-      (not (sequential? korks))
-      (get (get-shared owner) korks)
+     (cond
+       (not (sequential? korks))
+       (if (= korks :app-state)
+         (link (get (get-shared owner) :app-state))
+         (get (get-shared owner) korks))
 
-      (empty? korks)
-      (get-shared owner)
+       (empty? korks)
+       (get-shared owner)
 
-      :else
-      (get-in (get-shared owner) korks))))
+       :else
+       (if (= (first korks) :app-state)
+         (link (get (get-shared owner) :app-state))
+         (get-in (get-shared owner) korks)))))
+
+(defn get-app-state
+  "Return the app state. Used when building children components that
+   do not recieve their data from parents."
+  ([owner]
+     (get-shared owner :app-state))
+  ([owner korks]
+     (let [korks (if (sequential? korks)
+                   korks
+                   [korks])]
+       (link (get-in (get-shared owner :app-state) korks)))))
 
 (defn ^:private merge-pending-state [owner]
   (let [state (.-state owner)]
@@ -226,9 +276,10 @@
    (fn [next-props next-state]
      (this-as this
        (allow-reads
-         (let [props (.-props this)
-               state (.-state this)
-               c     (children this)]
+         (let [props  (.-props this)
+               cursor (aget props "__om_cursor")
+               state  (.-state this)
+               c      (children this)]
            ;; need to merge in props state first
            (merge-props-state this next-props)
            (if (satisfies? IShouldUpdate c)
@@ -236,7 +287,7 @@
                (get-props #js {:props next-props})
                (-get-state this))
              (cond
-               (not (identical? (-value (aget props "__om_cursor"))
+               (not (identical? (-value cursor)
                                 (-value (aget next-props "__om_cursor"))))
                true
 
@@ -246,14 +297,21 @@
                (not (== (aget props "__om_index") (aget next-props "__om_index")))
                true
 
+               (and (cursor? cursor)
+                    (-dirty? (-state cursor) (-path cursor)))
+               true
+
                :else false))))))
    :componentWillMount
    (fn []
      (this-as this
        (merge-props-state this)
-       (let [c (children this)]
+       (let [c     (children this)
+             props (get-props this)]
          (when (satisfies? IWillMount c)
-           (allow-reads (will-mount c))))
+           (allow-reads (will-mount c)))
+         (when (satisfies? ISubRoot props)
+           (-add-dep! (state props) (-parent-path props) (id this))))
        (merge-pending-state this)))
    :componentDidMount
    (fn []
@@ -264,9 +322,12 @@
    :componentWillUnmount
    (fn []
      (this-as this
-       (let [c (children this)]
+       (let [c     (children this)
+             props (get-props this)]
          (when (satisfies? IWillUnmount c)
-           (allow-reads (will-unmount c))))))
+           (allow-reads (will-unmount c)))
+         (when (cursor? props)
+           (-remove-dep! (state props) (id this))))))
    :componentWillUpdate
    (fn [next-props next-state]
      (this-as this
@@ -558,9 +619,6 @@
             :opts :shared ::index :instrument :ctor}
     (keys m)))
 
-(defn id [owner]
-  (aget (.-state owner) "__om_id"))
-
 (defn ^:private graft
   [value cursor]
   (let [state  (-state cursor)
@@ -586,16 +644,21 @@
      (let [cursor (if (and (not (cursor? cursor))
                            (cloneable? cursor))
                     (graft cursor *cursor*)
-                    cursor)]
+                    cursor)
+           parent *parent*]
        (cond
          (nil? m)
-         (let [shared (or (:shared m) (get-shared *parent*))
+         (let [shared (or (:shared m) (get-shared parent))
                ctor   (or (:ctor m) pure)]
            (tag
              (ctor #js {:__om_cursor cursor
                         :__om_shared shared
                         :__om_instrument *instrument*
-                        :children (fn [this] (allow-reads (f cursor this)))})
+                        :children
+                        (fn [this]
+                          (allow-reads
+                            (binding [*parent* parent]
+                              (f cursor this))))})
              f))
 
          :else
@@ -609,7 +672,7 @@
                rkey    (if-not (nil? key)
                          (get cursor' key)
                          (get m :react-key))
-               shared  (or (:shared m) (get-shared *parent*))
+               shared  (or (:shared m) (get-shared parent))
                ctor    (or (:ctor m) pure)]
            (tag
              (ctor #js {:__om_cursor cursor'
@@ -621,8 +684,14 @@
                         :key rkey
                         :children
                         (if (nil? opts)
-                          (fn [this] (allow-reads (f cursor' this)))
-                          (fn [this] (allow-reads (f cursor' this opts))))})
+                          (fn [this]
+                            (allow-reads
+                              (binding [*parent* parent]
+                                (f cursor' this))))
+                          (fn [this]
+                            (allow-reads
+                              (binding [*parent* parent]
+                                (f cursor' this opts)))))})
              f))))))
 
 (defn build
@@ -677,9 +746,23 @@
            (build f x (assoc m ::index i)))
       xs (range))))
 
+(defn ^:private remove-parent-paths [dirty current-path path-map]
+  (if-not (empty? current-path)
+    (let [next-path (pop current-path)]
+      (if-not (contains? path-map current-path)
+        (recur
+          (update-in dirty next-path #(dissoc % (peek current-path)))
+          next-path path-map)
+        (recur dirty next-path path-map)))
+    dirty))
+
 (defn ^:private setup [state key tx-listen]
   (when-not (satisfies? INotify state)
-    (let [listeners (atom {})]
+    (let [listeners (atom {})
+          deps      (atom {}) ;; parent-path -> #{subroot-id, ...}
+          sped      (atom {}) ;; subroot-id -> parent-path, for fast removal
+          dirty     (atom {}) ;; dirty map, used by shouldComponentUpdate
+          ]
       (specify! state
         INotify
         (-listen! [this key tx-listen]
@@ -693,7 +776,26 @@
           (when-not (nil? tx-listen)
             (doseq [[_ f] @listeners]
               (f tx-data root-cursor)))
-          this))))
+          this)
+        IDeps
+        (-add-dep! [this parent-path subroot-id]
+          (swap! deps update-in [parent-path] (fnil conj #{}) subroot-id)
+          (swap! sped assoc subroot-id parent-path)
+          (swap! dirty update-in parent-path (fnil identity ::dirty)))
+        (-remove-dep! [this subroot-id]
+          (doseq [path (get @sped subroot-id)]
+            (swap! deps update-in [path] disj subroot-id))
+          (swap! sped dissoc subroot-id)
+          ;; stop watching parent paths that don't need to be watched
+          (let [parent-path (get @sped subroot-id)]
+            (when (empty? (get @deps parent-path))
+              (swap! deps dissoc parent-path)
+              (swap! dirty remove-parent-paths parent-path @deps))))
+        (-dirty? [this path]
+          (let [dirty @dirty]
+            (if (pos? (count dirty))
+              (not= (get-in dirty path ::not-found) ::not-found)
+              false))))))
   (-listen! state key tx-listen))
 
 (defn ^:private tear-down [state key]
@@ -755,7 +857,8 @@
                                  (to-cursor (get-in value path) state path))]
                     (dom/render
                       (binding [*instrument* instrument]
-                        (build f cursor m))
+                        (build f cursor
+                          (assoc-in m [:shared :app-state] cursor)))
                       target)))]
       (add-watch state watch-key
         (fn [_ _ _ _]

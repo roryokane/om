@@ -124,6 +124,13 @@
                 :output-dir "examples/mixins/out"
                 :source-map true
                 :optimizations :none}}
+             {:id "tab-view"
+              :source-paths ["src" "examples/tab_view/src"]
+              :compiler {
+                :output-to "examples/tab_view/main.js"
+                :output-dir "examples/tab_view/out"
+                :source-map true
+                :optimizations :none}}
              {:id "tests"
               :source-paths ["src" "examples/tests/src"]
               :compiler {

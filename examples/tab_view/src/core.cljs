@@ -100,34 +100,3 @@
 
 (om/root app-view app-state
   {:target (.getElementById js/document "app")})
-
-;; =============================================================================
-
-;; (defn people-view [app owner opts]
-;;   (reify
-;;     om/IRender
-;;     (render [_]
-;;       (dom/div nil "People"))))
-
-;; (defn settings-view [app owner opts]
-;;   (reify
-;;     om/IRender
-;;     (render [_]
-;;       (dom/div nil "Settings"))))
-
-;; (defn people-view* [id owner opts]
-;;   (people-view (om/get-shared owner [:app-state :people]) owner opts))
-
-;; (defn settings-view* [id owner opts]
-;;   (settings-view (om/get-app-state owner :settings) owner opts))
-
-;; (defmethod content-view ::people-view [_] people-view*)
-
-;; (defmethod content-view ::settings-view [_] settings-view*)
-
-;; (om/root tab-view app-state
-;;   {:target (.getElementById js/document "tab-view1")
-;;    :opts {:identifier :name
-;;           :button-type ::button-type
-;;           :contents [::people-view ::settings-view]}})
-

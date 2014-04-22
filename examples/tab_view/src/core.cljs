@@ -45,7 +45,8 @@
          (dom/div nil
            (dom/span nil (str "Points: " (:points props)))
            (dom/button
-             #js {:onClick
+             #js {:style #js {:marginLeft 5}
+                  :onClick
                   (fn [e]
                     (om/transact! props :points inc))}
              "+")))))))

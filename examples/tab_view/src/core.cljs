@@ -9,11 +9,14 @@
   {:app-info {:title "MyApp"}
    :people
    [{:id 0 :first "Ben" :last "Bitdiddle"
-     :email "benb@mit.edu"}
+     :email "benb@mit.edu"
+     :points 0}
     {:id 1 :first "Alyssa" :middle-initial "P" :last "Hacker"
-     :email "aphacker@mit.edu"}
+     :email "aphacker@mit.edu"
+     :points 0}
     {:id 2 :first "Eva" :middle "Lu" :last "Ator"
-     :email "eval@mit.edu"}]})
+     :email "eval@mit.edu"
+     :points 0}]})
 
 (defn default-button-view [props owner opts]
   (reify
@@ -38,7 +41,14 @@
       (let [class-name (cond-> "content-view"
                          (:selected props) (str " selected"))]
        (dom/div #js {:className class-name}
-         (str (:last props) ", " (:first props)))))))
+         (dom/div nil (str (:last props) ", " (:first props)))
+         (dom/div nil
+           (dom/span nil (str "Points: " (:points props)))
+           (dom/button
+             #js {:onClick
+                  (fn [e]
+                    (om/transact! props :points inc))}
+             "+")))))))
 
 (defmulti content-view identity)
 
@@ -70,10 +80,8 @@
                      (== i selected) (assoc :selected true)))}))))))
 
 (defn people-tab-view [parent]
-  (let [data (om/get-app-state parent :people)]
-    (println "people-tab-view ISubRoot?"
-      (om/cursor? data) (satisfies? om/ISubRoot data))
-    (om/build tab-view data {:opts {:identifier :id}})))
+  (om/build tab-view (om/get-app-state parent :people)
+    {:opts {:identifier :id}}))
 
 (defn sub-view [app-info owner]
   (reify

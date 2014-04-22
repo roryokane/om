@@ -79,8 +79,8 @@
                    (cond-> content
                      (== i selected) (assoc :selected true)))}))))))
 
-(defn people-tab-view [parent]
-  (om/build tab-view (om/get-app-state parent :people)
+(defn people-tab-view []
+  (om/build tab-view (om/get-app-state om/*parent* :people)
     {:opts {:identifier :id}}))
 
 (defn sub-view [app-info owner]
@@ -89,7 +89,7 @@
     (render [_]
       (dom/div nil
         (dom/h1 nil (:title app-info))
-        (people-tab-view owner)))))
+        (people-tab-view)))))
 
 (defn app-view [app owner]
   (reify
